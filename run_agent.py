@@ -736,8 +736,13 @@ class AIAgent:
         self.provider = provider_name or ""
         self.acp_command = acp_command or command
         self.acp_args = list(acp_args or args or [])
-        if api_mode in {"chat_completions", "codex_responses", "anthropic_messages", "bedrock_converse"}:
+        if api_mode in {"chat_completions", "codex_responses", "anthropic_messages", "bedrock_converse", "patchright_browser"}:
             self.api_mode = api_mode
+        elif self.provider == "xai-grok":
+            self.api_mode = "chat_completions"  # Patchright adapter returns OpenAI-compatible format
+            # Patchright bridge cannot stream — it captures complete response after .action-buttons appears.
+            # Disable streaming dispatch so _interruptible_api_call (non-streaming) is used.
+            self._disable_streaming = True
         elif self.provider == "openai-codex":
             self.api_mode = "codex_responses"
         elif self.provider == "xai":
@@ -761,6 +766,17 @@ class AIAgent:
             self.api_mode = "bedrock_converse"
         else:
             self.api_mode = "chat_completions"
+
+        # Unconditional override for xai-grok (Patchright browser bridge to grok.com).
+        # This MUST run regardless of what api_mode/transport was passed in upstream,
+        # because the Patchright adapter returns a single non-iterable SimpleNamespace
+        # response (it captures the complete response after .action-buttons appears in
+        # the grok.com UI — there is no streaming mechanism to tap). If we don't force
+        # chat_completions + disable_streaming here, the upstream streaming dispatch
+        # crashes with: TypeError: 'types.SimpleNamespace' object is not iterable.
+        if self.provider == "xai-grok":
+            self.api_mode = "chat_completions"
+            self._disable_streaming = True
 
         try:
             from hermes_cli.model_normalize import (
@@ -4701,6 +4717,17 @@ class AIAgent:
             client = GeminiCloudCodeClient(**safe_kwargs)
             logger.info(
                 "Gemini Cloud Code Assist client created (%s, shared=%s) %s",
+                reason,
+                shared,
+                self._client_log_context(),
+            )
+            return client
+        if self.provider == "xai-grok":
+            from agent.patchright_client import PatchrightGrokClient
+
+            client = PatchrightGrokClient(model=self.model)
+            logger.info(
+                "Patchright Grok client created (%s, shared=%s) %s",
                 reason,
                 shared,
                 self._client_log_context(),

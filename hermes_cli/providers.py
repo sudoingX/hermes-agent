@@ -155,6 +155,10 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         transport="openai_chat",
         base_url_env_var="OLLAMA_BASE_URL",
     ),
+    "xai-grok": HermesOverlay(
+        transport="patchright_browser",
+        auth_type="browser_session",
+    ),
 }
 
 
@@ -272,6 +276,10 @@ ALIASES: Dict[str, str] = {
     "arcee-ai": "arcee",
     "arceeai": "arcee",
 
+    # xai-grok (Grok via X Premium+ browser bridge — separate from "grok": "xai" above)
+    "grok-premium": "xai-grok",
+    "grok-web": "xai-grok",
+
     # Local server aliases → virtual "local" concept (resolved via user config)
     "lmstudio": "lmstudio",
     "lm-studio": "lmstudio",
@@ -296,6 +304,7 @@ _LABEL_OVERRIDES: Dict[str, str] = {
     "local": "Local endpoint",
     "bedrock": "AWS Bedrock",
     "ollama-cloud": "Ollama Cloud",
+    "xai-grok": "Grok (X Premium+)",
 }
 
 
@@ -306,6 +315,7 @@ TRANSPORT_TO_API_MODE: Dict[str, str] = {
     "anthropic_messages": "anthropic_messages",
     "codex_responses": "codex_responses",
     "bedrock_converse": "bedrock_converse",
+    "patchright_browser": "patchright_browser",
 }
 
 
