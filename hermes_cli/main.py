@@ -526,7 +526,9 @@ def _session_browse_picker(sessions: list) -> Optional[str]:
                     cursor = 0
                     scroll_offset = 0
 
-        curses.wrapper(_curses_browse)
+        from hermes_cli.curses_ui import preserve_terminal_state
+        with preserve_terminal_state():
+            curses.wrapper(_curses_browse)
         return result_holder[0]
 
     except Exception:

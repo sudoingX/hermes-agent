@@ -4,6 +4,7 @@ Used by `hermes tools` and `hermes skills` for interactive checklists.
 Provides a curses multi-select with keyboard navigation, plus a
 text-based numbered fallback for terminals without curses support.
 """
+import contextlib
 import sys
 from typing import Callable, List, Optional, Set
 
@@ -30,6 +31,50 @@ def flush_stdin() -> None:
         termios.tcflush(sys.stdin, termios.TCIFLUSH)
     except Exception:
         pass
+
+
+@contextlib.contextmanager
+def preserve_terminal_state():
+    """Save stdin terminal attrs on entry, restore on exit.
+
+    curses.wrapper() calls curses.endwin() which is supposed to restore the
+    terminal, but on some emulators (tmux, certain VTE builds) it leaves
+    ICRNL/ICANON partially cleared. Subsequent input() then receives raw
+    \\r and hangs because no newline is delivered ("4^M" echo on Enter).
+    Saving on entry and restoring on exit with TCSADRAIN guarantees the
+    exact state the shell had before we touched it.
+
+    Mirrors the save/restore pattern in tools/terminal_tool.py:247-276.
+    Use as a context manager around every curses.wrapper() call:
+
+        with preserve_terminal_state():
+            curses.wrapper(_draw)
+
+    On non-TTY stdin or when termios is unavailable, this is a no-op
+    passthrough (safe to use in piped / redirected / Windows contexts).
+    """
+    saved = None
+    if sys.stdin.isatty():
+        try:
+            import termios
+            saved = termios.tcgetattr(sys.stdin.fileno())
+        except Exception:
+            pass
+    try:
+        yield
+    finally:
+        if saved is not None:
+            try:
+                import termios
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved)
+            except Exception as e:
+                try:
+                    import logging
+                    logging.getLogger(__name__).debug(
+                        "Failed to restore terminal attributes: %s", e
+                    )
+                except Exception:
+                    pass
 
 
 def curses_checklist(
@@ -152,7 +197,8 @@ def curses_checklist(
                     result_holder[0] = cancel_returns
                     return
 
-        curses.wrapper(_draw)
+        with preserve_terminal_state():
+            curses.wrapper(_draw)
         flush_stdin()
         return result_holder[0] if result_holder[0] is not None else cancel_returns
 
@@ -274,7 +320,8 @@ def curses_radiolist(
                     result_holder[0] = cancel_returns
                     return
 
-        curses.wrapper(_draw)
+        with preserve_terminal_state():
+            curses.wrapper(_draw)
         flush_stdin()
         return result_holder[0] if result_holder[0] is not None else cancel_returns
 
@@ -395,7 +442,8 @@ def curses_single_select(
                     result_holder[0] = None
                     return
 
-        curses.wrapper(_draw)
+        with preserve_terminal_state():
+            curses.wrapper(_draw)
         flush_stdin()
         if result_holder[0] is not None and result_holder[0] >= cancel_idx:
             return None
