@@ -221,6 +221,20 @@ DEFAULT_CONTEXT_LENGTHS = {
     "grok-3": 131072,           # grok-3, grok-3-mini, grok-3-fast, grok-3-mini-fast
     "grok-2": 131072,           # grok-2, grok-2-1212, grok-2-latest
     "grok": 131072,             # catch-all (grok-beta, unknown grok-*)
+    # Cursor (Anysphere) — models accessed via the cursor-agent CLI.
+    # These ARE the cursor-side context limits, not the underlying model's
+    # true window. Cursor's harness system prompt eats ~25-35K tokens of
+    # every turn (cached after the first call), so the *usable* window
+    # for chat history is the listed value minus that fixed overhead.
+    # Sources:
+    #   - https://cursor.com/docs/models (composer family pinned to 200K)
+    #   - https://cursor.com/blog/composer-2-5  (Composer 2.5 announcement)
+    #   - cursor-agent --list-models (model IDs)
+    "composer-2.5-fast": 200000,   # 200K per cursor docs (base model is 256K)
+    "composer-2.5": 200000,
+    "composer-2-fast": 200000,
+    "composer-2": 200000,
+    "composer": 200000,            # generic fallback
     # Kimi
     "kimi": 262144,
     # Tencent — Hy3 Preview (Hunyuan) with 256K context window.

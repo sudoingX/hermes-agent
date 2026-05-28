@@ -1,11 +1,78 @@
-#!/usr/bin/env python3
-"""
-Hermes Agent CLI launcher.
+#!/usr/bin/env bash
+# Run THIS fork (the directory containing this script) via whichever
+# Python venv has hermes-agent installed. Without this shim, the system
+# `hermes` script loads hermes_cli through the venv's editable .pth
+# finder, which is pinned to the original upstream source repo so any
+# changes in this fork are invisible. PYTHONPATH wins, so we use it.
+#
+# Usage:
+#   cd /path/to/this/fork
+#   ./hermes model
+#   ./hermes
+#   ./hermes <any other subcommand>
+#
+# Override the venv with:
+#   HERMES_VENV_PYTHON=/path/to/venv/bin/python3 ./hermes ...
 
-This wrapper should behave like the installed `hermes` command, including
-subcommands such as `gateway`, `cron`, and `doctor`.
-"""
+set -e
 
-if __name__ == "__main__":
-    from hermes_cli.main import main
-    main()
+FORK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve the venv python in the following order:
+#   1. $HERMES_VENV_PYTHON  (user override)
+#   2. ./venv/bin/python3   (fork-local venv)
+#   3. ../hermes-agent/venv/bin/python3  (sibling upstream-checkout convention)
+#   4. `command -v hermes`'s shebang  (find the venv the system hermes uses)
+_resolve_venv_python() {
+  if [ -n "$HERMES_VENV_PYTHON" ]; then
+    printf '%s' "$HERMES_VENV_PYTHON"; return
+  fi
+  if [ -x "$FORK_ROOT/venv/bin/python3" ]; then
+    printf '%s' "$FORK_ROOT/venv/bin/python3"; return
+  fi
+  local sibling="$(cd "$FORK_ROOT/.." 2>/dev/null && pwd)/hermes-agent/venv/bin/python3"
+  if [ -x "$sibling" ]; then
+    printf '%s' "$sibling"; return
+  fi
+  local sys_hermes
+  sys_hermes="$(command -v hermes 2>/dev/null || true)"
+  if [ -n "$sys_hermes" ] && [ -r "$sys_hermes" ]; then
+    local shebang
+    shebang="$(head -n 1 "$sys_hermes" | sed -E 's|^#!||')"
+    if [ -x "$shebang" ]; then
+      printf '%s' "$shebang"; return
+    fi
+  fi
+  return 1
+}
+
+HERMES_VENV_PYTHON="$(_resolve_venv_python)" || {
+  cat >&2 <<EOF
+error: could not find a python venv with hermes-agent installed.
+       tried (in order):
+         \$HERMES_VENV_PYTHON          (unset or non-executable)
+         $FORK_ROOT/venv/bin/python3
+         $FORK_ROOT/../hermes-agent/venv/bin/python3
+         shebang of \`command -v hermes\`
+
+       to fix: either install hermes in a venv beside this fork
+         (cd $FORK_ROOT/.. && git clone https://github.com/<upstream>/hermes-agent.git
+          && cd hermes-agent && python3 -m venv venv && venv/bin/pip install -e .)
+       OR set HERMES_VENV_PYTHON to your venv's python3.
+EOF
+  exit 1
+}
+
+if [ ! -x "$HERMES_VENV_PYTHON" ]; then
+  echo "error: venv python not executable: $HERMES_VENV_PYTHON" >&2
+  exit 1
+fi
+
+# PYTHONPATH wins over the editable .pth finder, so hermes_cli + agent +
+# providers all resolve to THIS directory.
+PYTHONPATH="$FORK_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+  exec "$HERMES_VENV_PYTHON" -c "
+from hermes_cli.main import main
+import sys
+sys.exit(main())
+" "$@"

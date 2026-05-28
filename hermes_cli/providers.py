@@ -95,6 +95,17 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         base_url_override="acp://copilot",
         base_url_env_var="COPILOT_ACP_BASE_URL",
     ),
+    "cursor": HermesOverlay(
+        # Wire-shape we present upstream is OpenAI chat completions — the
+        # external_process branch in agent/auxiliary_client.py constructs
+        # CursorAgentClient (drop-in for openai.OpenAI) instead of an HTTP
+        # client, so transport here is informational only.
+        transport="openai_chat",
+        auth_type="external_process",
+        base_url_override="cursor://agent",
+        base_url_env_var="HERMES_CURSOR_BASE_URL",
+        extra_env_vars=("CURSOR_API_KEY",),
+    ),
     "github-copilot": HermesOverlay(
         transport="openai_chat",
         extra_env_vars=("COPILOT_GITHUB_TOKEN", "GH_TOKEN"),
@@ -286,6 +297,13 @@ ALIASES: Dict[str, str] = {
     "github": "github-copilot",
     "github-copilot-acp": "copilot-acp",
 
+    # cursor (external_process via cursor-agent CLI)
+    "cursor-agent": "cursor",
+    "cursor-cli": "cursor",
+    "cursor-sub": "cursor",
+    "cursor-subscription": "cursor",
+    "anysphere": "cursor",
+
     # opencode (models.dev ID for OpenCode Zen)
     "opencode-zen": "opencode",
     "zen": "opencode",
@@ -369,6 +387,7 @@ _LABEL_OVERRIDES: Dict[str, str] = {
     "nous": "Nous Portal",
     "openai-codex": "OpenAI Codex",
     "copilot-acp": "GitHub Copilot ACP",
+    "cursor": "Cursor",
     "stepfun": "StepFun Step Plan",
     "xiaomi": "Xiaomi MiMo",
     "gmi": "GMI Cloud",

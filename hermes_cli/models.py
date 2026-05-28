@@ -196,6 +196,90 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     "copilot-acp": [
         "copilot-acp",
     ],
+    # Curated subset of `cursor-agent --list-models` (Ultra account, May 2026).
+    # Live catalog is fetched dynamically; this fallback is shown when the CLI
+    # is unavailable or the user has no `cursor-agent` login yet. Order
+    # roughly: server-pick, Cursor's house Composer models, then frontier
+    # families (GPT-5.x, Claude Opus/Sonnet 4.x, Gemini 3.x, Grok, Kimi).
+    "cursor": [
+        "auto",
+        "composer-2.5-fast",
+        "composer-2.5",
+        "composer-2-fast",
+        "composer-2",
+        # GPT-5.5
+        "gpt-5.5-medium",
+        "gpt-5.5-medium-fast",
+        "gpt-5.5-high",
+        "gpt-5.5-high-fast",
+        "gpt-5.5-low",
+        "gpt-5.5-low-fast",
+        "gpt-5.5-extra-high",
+        "gpt-5.5-extra-high-fast",
+        # GPT-5.4
+        "gpt-5.4-medium",
+        "gpt-5.4-medium-fast",
+        "gpt-5.4-high",
+        "gpt-5.4-high-fast",
+        "gpt-5.4-xhigh",
+        "gpt-5.4-mini-medium",
+        "gpt-5.4-mini-high",
+        "gpt-5.4-nano-medium",
+        # GPT-5.3 Codex
+        "gpt-5.3-codex",
+        "gpt-5.3-codex-fast",
+        "gpt-5.3-codex-high",
+        "gpt-5.3-codex-high-fast",
+        "gpt-5.3-codex-low",
+        "gpt-5.3-codex-low-fast",
+        "gpt-5.3-codex-xhigh",
+        "gpt-5.3-codex-xhigh-fast",
+        # GPT-5.2 Codex
+        "gpt-5.2",
+        "gpt-5.2-fast",
+        "gpt-5.2-codex",
+        "gpt-5.2-codex-fast",
+        "gpt-5.2-codex-high",
+        "gpt-5.2-codex-high-fast",
+        # GPT-5.1
+        "gpt-5.1",
+        "gpt-5.1-high",
+        "gpt-5.1-codex-max-medium",
+        "gpt-5.1-codex-max-high",
+        "gpt-5.1-codex-mini",
+        "gpt-5-mini",
+        # Claude Opus 4.7
+        "claude-opus-4-7-medium",
+        "claude-opus-4-7-medium-fast",
+        "claude-opus-4-7-high",
+        "claude-opus-4-7-high-fast",
+        "claude-opus-4-7-xhigh",
+        "claude-opus-4-7-max",
+        "claude-opus-4-7-thinking-high",
+        "claude-opus-4-7-thinking-max",
+        # Claude Opus 4.6 / 4.5
+        "claude-4.6-opus-high",
+        "claude-4.6-opus-high-thinking",
+        "claude-4.6-opus-max",
+        "claude-4.6-opus-max-thinking",
+        "claude-4.5-opus-high",
+        "claude-4.5-opus-high-thinking",
+        # Claude Sonnet
+        "claude-4.6-sonnet-medium",
+        "claude-4.6-sonnet-medium-thinking",
+        "claude-4.5-sonnet",
+        "claude-4.5-sonnet-thinking",
+        "claude-4-sonnet",
+        "claude-4-sonnet-thinking",
+        # Gemini
+        "gemini-3.1-pro",
+        "gemini-3-flash",
+        "gemini-3.5-flash",
+        # Grok / Kimi
+        "grok-4.3",
+        "grok-build-0.1",
+        "kimi-k2.5",
+    ],
     "copilot": [
         "gpt-5.4",
         "gpt-5.4-mini",
@@ -924,6 +1008,7 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
     ProviderEntry("nvidia",         "NVIDIA NIM",               "NVIDIA NIM (Nemotron models — build.nvidia.com or local NIM)"),
     ProviderEntry("copilot",        "GitHub Copilot",           "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)"),
     ProviderEntry("copilot-acp",    "GitHub Copilot ACP",       "GitHub Copilot ACP (spawns `copilot --acp --stdio`)"),
+    ProviderEntry("cursor",         "Cursor",                   "Cursor (100+ models, subscription)"),
     ProviderEntry("huggingface",    "Hugging Face",             "Hugging Face Inference Providers (20+ open models)"),
     ProviderEntry("gemini",         "Google AI Studio",         "Google AI Studio (Gemini models — native Gemini API)"),
     ProviderEntry("google-gemini-cli", "Google Gemini (OAuth)",   "Google Gemini via OAuth + Code Assist (free tier supported; no API key needed)"),
@@ -982,6 +1067,11 @@ _PROVIDER_ALIASES = {
     "github-model": "copilot",
     "github-copilot-acp": "copilot-acp",
     "copilot-acp-agent": "copilot-acp",
+    "cursor-agent": "cursor",
+    "cursor-cli": "cursor",
+    "cursor-sub": "cursor",
+    "cursor-subscription": "cursor",
+    "anysphere": "cursor",
     "google": "gemini",
     "google-gemini": "gemini",
     "google-ai-studio": "gemini",
@@ -2036,6 +2126,34 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
             pass
         if normalized == "copilot-acp":
             return list(_PROVIDER_MODELS.get("copilot", []))
+    if normalized == "cursor":
+        # Live catalog: shell out to `cursor-agent --list-models`. Falls back
+        # to the curated snapshot when the CLI is missing or returns nothing.
+        try:
+            import shutil as _shutil
+            import subprocess as _subprocess
+
+            cmd = _shutil.which("cursor-agent")
+            if cmd:
+                out = _subprocess.check_output(
+                    [cmd, "--list-models"],
+                    text=True,
+                    timeout=8,
+                )
+                ids: list[str] = []
+                for raw_line in out.splitlines():
+                    line = raw_line.strip()
+                    if not line or " - " not in line:
+                        continue
+                    model_id = line.split(" - ", 1)[0].strip()
+                    # Strip "(current)" / "(default)" decoration on the id
+                    model_id = model_id.split()[0]
+                    if model_id:
+                        ids.append(model_id)
+                if ids:
+                    return ids
+        except Exception:
+            pass
     if normalized == "nous":
         # Try live Nous Portal /models endpoint
         try:

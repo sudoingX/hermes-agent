@@ -49,9 +49,10 @@ def test_bundled_plugins_discovered():
 def test_all_profiles_register():
     """After discovery, the registry must contain every bundled provider directory.
 
-    This is an invariant — the number of profiles matches the number of plugin
+    This is an invariant: the number of profiles matches the number of plugin
     directories, not a hardcoded count. Counts shift when providers are
-    added/removed; that's expected and shouldn't break CI.
+    added/removed; that's expected and shouldn't break CI. The ``cursor``
+    plugin (uses cursor-agent CLI; usable on any Cursor tier) is one of those.
     """
     _clear_provider_caches()
     from providers import list_providers
@@ -70,7 +71,7 @@ def test_all_profiles_register():
     # Spot-check representative providers from different categories
     for required in (
         "openrouter", "anthropic", "custom", "bedrock", "openai-codex",
-        "minimax-oauth", "gmi", "xiaomi", "alibaba-coding-plan",
+        "minimax-oauth", "gmi", "xiaomi", "alibaba-coding-plan", "cursor",
     ):
         assert required in names, f"Missing profile: {required}"
 

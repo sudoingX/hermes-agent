@@ -2428,6 +2428,8 @@ def select_provider_and_model(args=None):
         _model_flow_google_gemini_cli(config, current_model)
     elif selected_provider == "copilot-acp":
         _model_flow_copilot_acp(config, current_model)
+    elif selected_provider == "cursor":
+        _model_flow_cursor(config, current_model)
     elif selected_provider == "copilot":
         _model_flow_copilot(config, current_model)
     elif selected_provider == "custom":
@@ -4993,6 +4995,507 @@ def _model_flow_copilot_acp(config, current_model=""):
         )
         or selected
     )
+    _save_model_choice(selected)
+
+    cfg = load_config()
+    model = cfg.get("model")
+    if not isinstance(model, dict):
+        model = {"default": model} if model else {}
+        cfg["model"] = model
+    model["provider"] = provider_id
+    model["base_url"] = effective_base
+    model["api_mode"] = "chat_completions"
+    save_config(cfg)
+    deactivate_provider()
+
+    print(f"Default model set to: {selected} (via {pconfig.name})")
+
+
+def _detect_cursor_ide_install() -> dict:
+    """Look for an existing Cursor IDE install on this machine.
+
+    Cursor IDE stores its session inside a VSCode-style SQLite database
+    (``state.vscdb``) protected by the OS keyring. We *cannot* safely
+    extract that token — Cursor has not blessed a public format and the
+    encryption keys live in libsecret / Keychain / DPAPI. But the IDE's
+    *presence* is a useful signal: if you're already signed into Cursor
+    in the IDE, the OAuth tab that ``cursor-agent login`` opens will
+    typically be a one-click "Authorize this device" because your
+    browser already has a cursor.com session.
+
+    Returns ``{"installed": bool, "path": str, "platform": str}``.
+    """
+    import platform
+
+    home = os.path.expanduser("~")
+    candidates: list[tuple[str, str]] = []
+    system = platform.system()
+    if system == "Linux":
+        candidates = [
+            ("linux-config", os.path.join(home, ".config", "Cursor")),
+            ("linux-config-portable", os.path.join(home, ".config", "Cursor-portable")),
+        ]
+    elif system == "Darwin":
+        candidates = [
+            ("macos-app-support", os.path.join(home, "Library", "Application Support", "Cursor")),
+            ("macos-applications", "/Applications/Cursor.app"),
+        ]
+    elif system == "Windows":
+        appdata = os.environ.get("APPDATA", os.path.join(home, "AppData", "Roaming"))
+        candidates = [
+            ("windows-roaming", os.path.join(appdata, "Cursor")),
+        ]
+
+    for label, path in candidates:
+        if os.path.isdir(path) or os.path.exists(path):
+            return {"installed": True, "path": path, "platform": label}
+    return {"installed": False, "path": "", "platform": system.lower()}
+
+
+def _save_cursor_api_key_to_env(api_key: str) -> str:
+    """Persist a manually-entered Cursor API key to ``~/.hermes/.env``.
+
+    Returns the path to the .env file (best-effort; returns empty string
+    on failure).
+    """
+    from hermes_cli.config import save_env_value
+
+    try:
+        save_env_value("CURSOR_API_KEY", api_key)
+    except Exception as exc:
+        print(f"  ⚠ Could not save CURSOR_API_KEY to ~/.hermes/.env: {exc}")
+        return ""
+    try:
+        from hermes_constants import display_hermes_home as _dhh
+
+        return f"{_dhh()}/.env"
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), ".hermes", ".env")
+
+
+def _prompt_cursor_auth_choice(ide_info: dict) -> str:
+    """Ask the user how they want to authenticate to Cursor.
+
+    Returns one of:
+      - ``"browser"`` — run ``cursor-agent login`` (default)
+      - ``"paste"``   — read CURSOR_API_KEY interactively, save to .env
+      - ``"cancel"``  — abort the picker without saving anything
+    """
+    print()
+    print("  Auth status:")
+    if ide_info.get("installed"):
+        print(f"    ✓ Cursor IDE detected at {ide_info['path']}")
+        print("      (your IDE login pre-fills the browser OAuth — usually one click)")
+    else:
+        print("    · Cursor IDE not detected on this machine")
+    print("    ✗ cursor-agent CLI:  not logged in (separate auth from IDE)")
+    print("    ✗ CURSOR_API_KEY:    not set")
+    print()
+    print("  How would you like to authenticate?")
+    print("    [1] Open browser (recommended — uses your cursor.com session)")
+    print("    [2] Paste a Cursor API key (from https://cursor.com/dashboard/integrations)")
+    print("    [3] Cancel")
+    try:
+        choice = input("  Choice [1]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return "cancel"
+    if choice in {"", "1", "browser", "b"}:
+        return "browser"
+    if choice in {"2", "paste", "p", "key"}:
+        return "paste"
+    return "cancel"
+
+
+def _print_cursor_windows_install_instructions() -> None:
+    """Print WSL-based install instructions for native Windows.
+
+    Cursor's official position (confirmed in cursor.com docs + their
+    community forum, Jan 2026): cursor-agent CLI is supported on
+    macOS, Linux, and Windows-via-WSL ONLY. There is no native
+    Windows binary. Community ports exist but are unofficial and
+    unsupported, and the broader ecosystem has seen SEO-poisoned
+    phishing pages distributing fake "PowerShell installers" for
+    Gemini CLI / Claude Code. We never auto-pipe an arbitrary URL
+    into PowerShell. The right answer on Windows is WSL, and we say
+    so clearly with the exact steps from Cursor's docs.
+    """
+    print()
+    print("  ⚠ cursor-agent CLI not found on this Windows machine.")
+    print()
+    print("  Cursor's official CLI does not support native Windows")
+    print("  (no PowerShell/CMD build). The supported path is WSL.")
+    print()
+    print("  Install steps:")
+    print()
+    print("    1. Open PowerShell as Administrator and run:")
+    print("         wsl --install")
+    print("    2. Reboot Windows if prompted.")
+    print("    3. Open a WSL terminal (Ubuntu by default).")
+    print("    4. Inside WSL, run:")
+    print("         curl https://cursor.com/install -fsS | bash")
+    print("         echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc")
+    print("         source ~/.bashrc")
+    print("         cursor-agent login")
+    print("    5. Re-run Hermes from inside the WSL shell, not PowerShell.")
+    print()
+    print("  Use ONLY the official cursor.com URL — third-party")
+    print("  \"PowerShell installer\" sites have been observed distributing")
+    print("  malware via fake CLI install pages (Jan 2026 reports).")
+    print()
+
+
+def _prompt_cursor_install_choice(ide_info: dict) -> str:
+    """Ask the user how to handle a missing cursor-agent CLI.
+
+    Cursor has no public REST API — the CLI is the runtime, not just
+    an auth helper. So unlike Claude (where pasting a token alone
+    works because we can call the Anthropic HTTP API directly), we
+    cannot proceed without ``cursor-agent`` on PATH. This menu mirrors
+    the Claude Code "CLI required" flow: offer to install inline,
+    offer manual instructions, or cancel.
+
+    Returns one of:
+      - ``"install"`` — run the official one-line installer (with consent)
+      - ``"manual"``  — print the install command and exit so user runs it
+      - ``"cancel"``  — abort the picker
+    """
+    print()
+    print("  ⚠ cursor-agent CLI not found on this machine.")
+    print()
+    if ide_info.get("installed"):
+        print(f"  ✓ Cursor IDE detected at {ide_info['path']}")
+        print("    (the CLI is a separate binary; it can't reuse the IDE's")
+        print("     encrypted token, so you still need cursor-agent installed)")
+    else:
+        print("  Cursor IDE not detected either.")
+    print()
+    print("  Cursor's models are only reachable via the cursor-agent CLI;")
+    print("  there is no public REST API to call directly. Pick one:")
+    print()
+    print("    [1] Install cursor-agent now")
+    print("        runs: curl https://cursor.com/install -fsS | bash")
+    print("        (installs to ~/.local/bin — no sudo required)")
+    print("    [2] I'll install it manually")
+    print("    [3] Cancel")
+    try:
+        choice = input("  Choice [1]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return "cancel"
+    if choice in {"", "1", "install", "i", "y", "yes"}:
+        return "install"
+    if choice in {"2", "manual", "m"}:
+        return "manual"
+    return "cancel"
+
+
+def _run_cursor_agent_installer() -> bool:
+    """Run cursor.com's official one-line installer.
+
+    This is a ``curl | bash`` pipeline so it requires explicit user
+    consent. We invoke it via the user's shell to honour the pipe
+    (subprocess with shell=False would not handle redirection).
+    Cursor installs to ``~/.local/bin/cursor-agent`` by default, which
+    may not be on ``PATH`` in the current shell — we surface that
+    case clearly so the user knows what to do next.
+
+    Returns ``True`` when the CLI ends up resolvable (either on PATH
+    or via the standard ``~/.local/bin`` fallback), ``False``
+    otherwise.
+    """
+    import shutil
+    import subprocess
+
+    print()
+    print("  Running: curl https://cursor.com/install -fsS | bash")
+    print()
+    try:
+        confirm = input("  This pipes a remote script into bash. Proceed? [y/N]: ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        confirm = ""
+    if confirm not in {"y", "yes"}:
+        print("  Cancelled. You can install manually anytime:")
+        print("    curl https://cursor.com/install -fsS | bash")
+        return False
+
+    print()
+    try:
+        result = subprocess.run(
+            "curl https://cursor.com/install -fsS | bash",
+            shell=True,
+            check=False,
+        )
+    except Exception as exc:
+        print(f"  ✗ Installer error: {exc}")
+        print("  See https://cursor.com/cli for manual install steps.")
+        return False
+    if result.returncode != 0:
+        print(f"  ✗ Installer exited with code {result.returncode}.")
+        print("  See https://cursor.com/cli for manual install steps.")
+        return False
+
+    print()
+    print("  ✓ Installer finished. Verifying cursor-agent is reachable...")
+
+    # ``shutil.which`` first — if PATH was already correct we're done.
+    if shutil.which("cursor-agent"):
+        print("  ✓ cursor-agent is on PATH.")
+        return True
+    # Fallback: cursor installs to ~/.local/bin by default. If that's
+    # not on the user's PATH yet, point them at it explicitly so they
+    # can either add it (preferred) or run Hermes with
+    # ``HERMES_CURSOR_COMMAND`` pointing at the absolute path.
+    local_bin = os.path.expanduser("~/.local/bin/cursor-agent")
+    if os.path.exists(local_bin):
+        print(f"  ✓ Installed at {local_bin}")
+        print(
+            "    But your shell hasn't picked it up yet. Either add ~/.local/bin\n"
+            "    to PATH (recommended) or run Hermes with:\n"
+            f"      HERMES_CURSOR_COMMAND={local_bin} ./hermes model"
+        )
+        # We can hand the absolute path back via env so the SAME picker
+        # invocation can proceed in this session.
+        os.environ["HERMES_CURSOR_COMMAND"] = local_bin
+        print("  ✓ Set HERMES_CURSOR_COMMAND for this session — continuing.")
+        return True
+    print("  ✗ Could not find cursor-agent after install.")
+    print("    See https://cursor.com/cli for troubleshooting.")
+    return False
+
+
+def _run_cursor_agent_login(cursor_agent_path: str) -> bool:
+    """Drive ``cursor-agent login`` interactively from inside Hermes.
+
+    ``cursor-agent`` opens the browser itself (set ``NO_OPEN_BROWSER=1`` to
+    suppress) and handles the OAuth handshake. We inherit stdio so the user
+    sees the prompt URL / progress, wait for it to finish, and return
+    whether the exit was clean.
+
+    Returns ``True`` when the subprocess exits 0 (login succeeded or user
+    confirmed they were already logged in), ``False`` otherwise.
+    """
+    import subprocess
+
+    print()
+    print("  Launching `cursor-agent login`. A browser tab should open shortly.")
+    print("  (Set NO_OPEN_BROWSER=1 if you'd rather copy the URL manually.)")
+    print()
+    try:
+        result = subprocess.run(
+            [cursor_agent_path, "login"],
+            check=False,
+        )
+    except FileNotFoundError:
+        print(f"  ⚠ Could not exec '{cursor_agent_path}'.")
+        return False
+    except KeyboardInterrupt:
+        print()
+        print("  Login cancelled.")
+        return False
+    return result.returncode == 0
+
+
+def _prompt_cursor_api_key_paste() -> str:
+    """Read a Cursor API key interactively and validate it minimally.
+
+    Returns the key string or an empty string if the user aborted.
+    """
+    import getpass
+
+    print()
+    print("  Paste your Cursor API key.")
+    print("  Get one at https://cursor.com/dashboard/integrations")
+    print("  (Press Enter on an empty line to cancel.)")
+    try:
+        key = getpass.getpass("  CURSOR_API_KEY: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return ""
+    if not key:
+        return ""
+    # Light validation: cursor keys are reasonably long opaque strings.
+    if len(key) < 16:
+        print("  ⚠ That key looks too short. Please double-check and try again.")
+        return ""
+    return key
+
+
+def _model_flow_cursor(config, current_model=""):
+    """Cursor flow. Works on any tier via the cursor-agent CLI.
+
+    Unlike OpenAI Codex (which uses an OAuth login command), Cursor's
+    authentication happens through the ``cursor-agent`` binary itself. We
+    surface clear instructions if the CLI isn't installed or hasn't been
+    logged in.
+    """
+    from hermes_cli.auth import (
+        PROVIDER_REGISTRY,
+        _prompt_model_selection,
+        _save_model_choice,
+        deactivate_provider,
+        get_external_process_provider_status,
+        resolve_external_process_provider_credentials,
+    )
+    from hermes_cli.models import _PROVIDER_MODELS, provider_model_ids
+    from hermes_cli.config import load_config, save_config
+
+    del config
+
+    provider_id = "cursor"
+    pconfig = PROVIDER_REGISTRY[provider_id]
+    status = get_external_process_provider_status(provider_id)
+    resolved_command = (
+        status.get("resolved_command") or status.get("command") or "cursor-agent"
+    )
+    # Internal routing marker — used when persisting the model choice
+    # below, NOT printed to the user. ``hermes doctor`` surfaces it
+    # when debugging the integration.
+    effective_base = status.get("base_url") or pconfig.inference_base_url
+    # Only surface the ``Command:`` line when something interesting is
+    # going on: the user explicitly overrode the binary via env, OR
+    # cursor-agent isn't on PATH. The default install path is noise.
+    has_command_override = bool(
+        os.environ.get("HERMES_CURSOR_COMMAND")
+        or os.environ.get("CURSOR_AGENT_PATH")
+    )
+
+    if not status.get("configured"):
+        # Windows special-case: cursor-agent has no native Windows
+        # binary; Cursor's official answer is WSL. We print the WSL
+        # steps and bail BEFORE the curl|bash menu, which would only
+        # produce a confusing "bash: not found" error in PowerShell.
+        import platform as _platform_mod
+        if _platform_mod.system() == "Windows":
+            _print_cursor_windows_install_instructions()
+            return
+
+        # Missing cursor-agent on Linux/Mac isn't fatal — we offer to
+        # install it right here so users on a fresh machine (or one
+        # with only the IDE) get an end-to-end "set up cursor"
+        # experience instead of bouncing out with an install URL.
+        # This mirrors Claude Code's missing-CLI flow.
+        ide_info = _detect_cursor_ide_install()
+        choice = _prompt_cursor_install_choice(ide_info)
+        if choice == "cancel":
+            return
+        if choice == "manual":
+            print()
+            print("  Install command:")
+            print("    curl https://cursor.com/install -fsS | bash")
+            print("  Then re-run: ./hermes model")
+            return
+        # choice == "install"
+        if not _run_cursor_agent_installer():
+            return
+        # Re-check after install — picks up the env override we may
+        # have set (HERMES_CURSOR_COMMAND) so the rest of the flow
+        # can proceed in the SAME picker invocation.
+        status = get_external_process_provider_status(provider_id)
+        resolved_command = (
+            status.get("resolved_command") or status.get("command") or "cursor-agent"
+        )
+        effective_base = status.get("base_url") or pconfig.inference_base_url
+        if not status.get("configured"):
+            print()
+            print("  ⚠ Install succeeded but cursor-agent still isn't reachable.")
+            print("    See troubleshooting at https://cursor.com/cli")
+            return
+    if has_command_override:
+        print(f"  Command: {resolved_command}")
+
+    if status.get("email"):
+        print(f"  Logged in as: {status['email']}")
+    elif status.get("logged_in"):
+        print("  Logged in: yes (via CURSOR_API_KEY)")
+    else:
+        # Detect whether the user has Cursor IDE installed. We can't import
+        # the IDE's token (it's libsecret-encrypted SQLite that Cursor
+        # doesn't publicly document), but its presence is a useful signal:
+        # the OAuth tab `cursor-agent login` opens is usually a one-click
+        # "Authorize this device" because the browser already has a
+        # cursor.com session.
+        ide_info = _detect_cursor_ide_install()
+        choice = _prompt_cursor_auth_choice(ide_info)
+
+        if choice == "cancel":
+            print()
+            print("  Skipping. Run `cursor-agent login` manually or set "
+                  "CURSOR_API_KEY in ~/.hermes/.env, then re-run `hermes model`.")
+            return
+
+        if choice == "paste":
+            key = _prompt_cursor_api_key_paste()
+            if not key:
+                print("  No key entered. Aborting.")
+                return
+            env_path = _save_cursor_api_key_to_env(key)
+            os.environ["CURSOR_API_KEY"] = key
+            print(f"  ✓ CURSOR_API_KEY saved to {env_path}")
+            status = get_external_process_provider_status(provider_id)
+        else:  # "browser"
+            ok = _run_cursor_agent_login(resolved_command)
+            if not ok:
+                print("  Login did not complete. You can try again with "
+                      "`cursor-agent login` or pick option [2] to paste a key.")
+                return
+            status = get_external_process_provider_status(provider_id)
+
+        if status.get("email"):
+            print(f"  Logged in as: {status['email']}")
+        elif status.get("logged_in"):
+            print("  Logged in: yes")
+        else:
+            print(
+                "  ⚠ Could not confirm login. If you completed the browser "
+                "flow, re-run `hermes model` and pick Cursor again."
+            )
+            return
+    print()
+
+    try:
+        creds = resolve_external_process_provider_credentials(provider_id)
+    except Exception as exc:
+        print(f"  ⚠ {exc}")
+        return
+    effective_base = creds.get("base_url") or effective_base
+
+    # Show the cursor permission mode that will be active in chat so the
+    # user isn't surprised by read-only behavior or, conversely, a fully
+    # autonomous agent. Default is ``agent`` (matches cursor-agent's own
+    # default permissionMode); users opt into read-only via env var.
+    _cursor_mode = os.environ.get("HERMES_CURSOR_MODE", "").strip().lower() or "agent"
+    _mode_blurb = {
+        "agent": "full write+edit+shell (set HERMES_CURSOR_MODE=ask for read-only)",
+        "ask":   "read-only Q&A only (set HERMES_CURSOR_MODE=agent for full power)",
+        "plan":  "read-only planning mode (set HERMES_CURSOR_MODE=agent for full power)",
+    }.get(_cursor_mode, _cursor_mode)
+    print(f"  Cursor mode:  {_cursor_mode} — {_mode_blurb}")
+
+    # Live catalog first (115+ models incl. composer-2.5-fast default);
+    # fall back to the curated snapshot if the CLI call fails.
+    model_list = provider_model_ids(provider_id)
+    if not model_list:
+        model_list = list(_PROVIDER_MODELS.get("cursor", []))
+        print("  ⚠ Could not fetch live model list — showing defaults.")
+    else:
+        print(f"  Found {len(model_list)} model(s) from cursor-agent --list-models")
+
+    if model_list:
+        selected = _prompt_model_selection(
+            model_list,
+            current_model=current_model,
+        )
+    else:
+        try:
+            selected = input("Model name: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            selected = None
+
+    if not selected:
+        print("No change.")
+        return
+
     _save_model_choice(selected)
 
     cfg = load_config()
