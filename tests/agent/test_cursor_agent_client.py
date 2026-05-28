@@ -491,6 +491,7 @@ class CreateChatCompletionTests(unittest.TestCase):
         # Make env predictable.
         keys = [k for k in os.environ if k.startswith("HERMES_CURSOR_") or k == "CURSOR_API_KEY" or k == "CURSOR_AGENT_PATH"]
         self._saved = {k: os.environ.pop(k) for k in keys}
+        os.environ["HERMES_CURSOR_BACKEND"] = "cli"
 
     def tearDown(self) -> None:
         for k, v in self._saved.items():
@@ -503,7 +504,7 @@ class CreateChatCompletionTests(unittest.TestCase):
             fake_proc.env_seen = kwargs.get("env")
             return fake_proc
 
-        return patch("agent.cursor_agent_client.subprocess.Popen", side_effect=_fake_popen)
+        return patch("agent.cursor.cli_backend.subprocess.Popen", side_effect=_fake_popen)
 
     def test_happy_path_returns_openai_shaped_response(self) -> None:
         proc = _FakeProcess(SUCCESS_STREAM)
@@ -1453,6 +1454,16 @@ class CreateChatCompletionTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_backend_property_reflects_resolution(self) -> None:
+        os.environ["HERMES_CURSOR_BACKEND"] = "auto"
+        with patch("agent.cursor.backend.cursor_sdk_installed", return_value=True):
+            cli_client = CursorAgentClient()
+            self.assertEqual(cli_client.backend, "cli")
+            cli_client.close()
+            sdk_client = CursorAgentClient(api_key="crsr_real_test_key")
+            self.assertEqual(sdk_client.backend, "sdk")
+            sdk_client.close()
+
     def test_subprocess_env_has_cursor_api_key_when_provided(self) -> None:
         proc = _FakeProcess(SUCCESS_STREAM)
         client = CursorAgentClient(api_key="crsr_test_42")
@@ -1642,7 +1653,7 @@ class TimeoutTests(unittest.TestCase):
             fake_proc.env_seen = kwargs.get("env")
             return fake_proc
 
-        return patch("agent.cursor_agent_client.subprocess.Popen", side_effect=_fake_popen)
+        return patch("agent.cursor.cli_backend.subprocess.Popen", side_effect=_fake_popen)
 
     def test_context_estimate_callback_fires_before_subprocess(self) -> None:
         # Regression: the status bar sat at 0/200K throughout a long
@@ -1764,7 +1775,7 @@ class TimeoutTests(unittest.TestCase):
             return proc
 
         try:
-            with patch("agent.cursor_agent_client.subprocess.Popen", side_effect=_fake_popen):
+            with patch("agent.cursor.cli_backend.subprocess.Popen", side_effect=_fake_popen):
                 resp = client.chat.completions.create(
                     model="composer-2.5",
                     messages=[{"role": "user", "content": "Hi"}],

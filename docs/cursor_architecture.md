@@ -83,7 +83,7 @@ Legend / lifecycle:
           Hermes observes but doesn't gate them past Hermes' approvals.mode)
 ```
 
-**Key files:** `agent/cursor_agent_client.py` (runtime + accumulator + bridge), `plugins/model-providers/cursor/` (provider profile), `hermes_cli/auth.py` (credentials + status), `agent/agent_runtime_helpers.py:create_openai_client()` (client factory), `agent/conversation_compression.py` (compress + duck-typed reset hook), `agent/display.py` (`get_cute_tool_message`, `extract_edit_diff`; unified diff rendering for cursor edits).
+**Key files:** `agent/cursor/` (package: CLI + SDK backends, typed events, `CursorTurnAccumulator`, bridge), `agent/cursor_agent_client.py` (backward-compat re-exports), `plugins/model-providers/cursor/` (provider profile), `hermes_cli/auth.py` (credentials + status), `agent/agent_runtime_helpers.py:create_openai_client()` (client factory), `agent/conversation_compression.py` (compress + duck-typed reset hook), `agent/display.py` (`get_cute_tool_message`, `extract_edit_diff`; unified diff rendering for cursor edits).
 
 ---
 
@@ -118,7 +118,7 @@ Aliases resolving to `cursor`: `cursor-agent`, `cursor-cli`, `cursor-sub`, `curs
 
 **Per-request lifecycle:**
 
-1. **Prompt assembly.** `_format_messages_as_prompt()` flattens the OpenAI message list (system/user/assistant/tool) into a single stdin prompt. Tool schemas are inlined as JSON; the model is instructed to emit Hermes tool calls as `<tool_call>{...}</tool_call>` blocks (grammar shared with `copilot_acp_client`).
+1. **Prompt assembly.** `format_messages_as_prompt()` flattens the OpenAI message list (system/user/assistant/tool) into a single stdin prompt. Tool schemas are inlined as JSON; the model is instructed to emit Hermes tool calls as `<tool_call>{...}</tool_call>` blocks (grammar shared with `copilot_acp_client`).
 2. **Workspace.** Session-scoped: one temp dir per `CursorAgentClient` instance, reused for every call. Created lazily on first call as `hermes-cursor-*`, tracked in `_ephemeral_dirs` for cleanup at `close()`. Override with `HERMES_CURSOR_WORKSPACE` or the `workspace` ctor arg. A fresh dir per call previously cost roughly 4 to 5 seconds of "first-time workspace bootstrap" tax on every turn; fixed by reusing the dir across the session.
 3. **Argv.** `cursor-agent -p --output-format stream-json --model <m> --workspace <ws> --force --trust` plus optional `--mode`, `--api-key`, and `HERMES_CURSOR_ARGS`.
 4. **Mode mapping:**
@@ -246,6 +246,26 @@ Completed internal events also populate `response.cursor_internal_tools` / `mess
 | `HERMES_CURSOR_WORKSPACE` | session-scoped temp dir | Pin workspace directory (reused across all turns of one session by default) |
 | `HERMES_CURSOR_BASE_URL` | `cursor://agent` | Provider marker (not HTTP) |
 | `HERMES_CURSOR_TIMEOUT_SECONDS` | `1800` | Idle threshold (not wall-clock). Resets on every stream-json event from cursor-agent. A turn may run arbitrarily long in total provided events keep arriving; only true subprocess hangs trigger termination. Default is 30 minutes; cursor-agent's own internal shell ceiling is 10 min so chained long operations can routinely exceed 15 min. Hermes' outer 90s stale-call detector is disabled for cursor so this is the only timeout in effect. |
+| `HERMES_CURSOR_BACKEND` | `auto` | Transport: `auto` (SDK when `cursor-sdk` is installed **and** a real `CURSOR_API_KEY` is set; otherwise CLI), `sdk` (force SDK), `cli` (force `cursor-agent` subprocess). |
+
+## Backend Selection (CLI vs SDK)
+
+Hermes supports two transports for the cursor provider:
+
+| Backend | When used | Auth |
+|---------|-----------|------|
+| **CLI** (`cursor-agent`) | Default for browser-OAuth users (`cursor-agent login`) | CLI session or optional `CURSOR_API_KEY` forwarded to subprocess |
+| **SDK** (`cursor-sdk`) | `HERMES_CURSOR_BACKEND=auto` with `CURSOR_API_KEY` set, or `HERMES_CURSOR_BACKEND=sdk` | User API Key from [Dashboard → Integrations](https://cursor.com/dashboard/integrations) |
+
+Install the SDK extra: `uv pip install 'hermes-agent[cursor]'` or `uv pip install cursor-sdk`.
+
+**Lazy install:** When `HERMES_CURSOR_BACKEND=auto|sdk` and a real `CURSOR_API_KEY` is set, Hermes calls `tools.lazy_deps.ensure("provider.cursor_sdk")` on first SDK use (and offers install in `hermes model` when the key is present but the package is missing). After activation, `hermes update` refreshes `cursor-sdk` via `_refresh_active_lazy_features()` like other lazy backends.
+
+On `auto`, if the SDK path fails because the account lacks `sdk_python_preview_access`, Hermes falls back to the CLI transparently.
+
+Implementation: `agent/cursor/cli_backend.py` and `agent/cursor/sdk_backend.py` both emit typed `CursorTurnEvent`s into `CursorTurnAccumulator` (`agent/cursor/accumulator.py`), so the UI bridge, compression hooks, and status bar stay unchanged regardless of transport.
+
+**Hermes streaming:** True token-by-token Hermes streaming for cursor via the SDK is deferred; both transports accumulate a full turn before returning an OpenAI-shaped response (with optional chunk synthesis for callers that pass `stream=True`).
 
 ## Turn-Level Timeout Semantics
 
@@ -280,23 +300,21 @@ Cursor released a Python SDK (`cursor-sdk`, public beta, v0.1.5 as of
 2026-05-23) which exposes a higher-level agent API with native streaming,
 typed events (`run.messages()`), proper cancellation (`run.cancel()`),
 and a structured error model (`CursorAgentError` with `is_retryable` /
-`retry_after`). It is the architecturally better target than the
-subprocess shim.
+`retry_after`).
 
-We intentionally did **not** adopt it in this PR for three reasons:
+**Status (2026-05-28):** Hermes now supports the SDK as an opt-in/auto
+backend via `HERMES_CURSOR_BACKEND` and `agent/cursor/sdk_backend.py`.
+The CLI subprocess remains the default for users who only have browser
+OAuth (`cursor-agent login`) without a User API Key.
 
-1. API access via the SDK is currently allowlist-gated. Users without
-   `sdk_python_preview_access` get `IntegrationNotConnectedError`, which
-   breaks the "any Cursor subscriber can use this" promise.
-2. SDK auth requires manually generating a User API Key
-   (Dashboard → Integrations) and exporting `CURSOR_API_KEY`. The CLI's
-   browser OAuth flow is one-time and friction-free; replacing it would
-   regress the onboarding experience.
-3. v0.1.5 in two weeks with documented "APIs may change before GA"
-   warnings makes upstream pinning risky for a foundational integration.
+Remaining gaps before SDK becomes the unconditional default:
 
-When all three constraints lift (SDK GA + allowlist removed + auth
-flow supports either API key or CLI-derived token), the inner subprocess
-layer should be replaced by an SDK-backed implementation. The outer
-layer (`auth_type="external_process"`, provider registration, model
-catalog) stays as-is; only `agent/cursor_agent_client.py` changes.
+1. API access via the SDK is still allowlist-gated for some accounts
+   (`sdk_python_preview_access`). Auto mode falls back to CLI when this
+   blocks.
+2. SDK auth still requires manually generating a User API Key — no
+   browser OAuth flow yet.
+3. v0.1.5 ships with "APIs may change before GA" warnings; pin carefully.
+
+When all three constraints lift, `auto` can flip its default to SDK-first
+without changing the outer provider registration layer.

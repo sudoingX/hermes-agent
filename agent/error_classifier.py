@@ -433,6 +433,74 @@ _SSL_TRANSIENT_PATTERNS = [
 ]
 
 
+def _classify_cursor_sdk_error(error: Exception, result_fn) -> "ClassifiedError | None":
+    """Map cursor-sdk CursorAgentError into Hermes failover hints."""
+    try:
+        from cursor_sdk.errors import (
+            AuthenticationError,
+            CursorAgentError,
+            IntegrationNotConnectedError,
+            NotFoundError,
+            RateLimitError,
+        )
+    except ImportError:
+        return None
+
+    if not isinstance(error, CursorAgentError):
+        return None
+
+    status = getattr(error, "status", None) or getattr(error, "status_code", None)
+    retryable = bool(getattr(error, "is_retryable", False))
+
+    if isinstance(error, IntegrationNotConnectedError):
+        return result_fn(
+            FailoverReason.auth,
+            status_code=status,
+            retryable=False,
+            should_fallback=True,
+        )
+    if isinstance(error, AuthenticationError):
+        return result_fn(
+            FailoverReason.auth,
+            status_code=status,
+            retryable=False,
+            should_rotate_credential=True,
+            should_fallback=True,
+        )
+    if isinstance(error, RateLimitError):
+        return result_fn(
+            FailoverReason.rate_limit,
+            status_code=status or 429,
+            retryable=True,
+            should_rotate_credential=True,
+            should_fallback=True,
+        )
+    if isinstance(error, NotFoundError):
+        return result_fn(
+            FailoverReason.model_not_found,
+            status_code=status or 404,
+            retryable=False,
+            should_fallback=True,
+        )
+
+    if status is not None:
+        by_status = _classify_by_status(int(status), str(getattr(error, "message", error)).lower(), result_fn)
+        if by_status is not None:
+            if retryable and not by_status.retryable:
+                return result_fn(by_status.reason, status_code=status, retryable=True)
+            return by_status
+
+    if retryable:
+        return result_fn(FailoverReason.server_error, status_code=status, retryable=True)
+
+    return result_fn(
+        FailoverReason.format_error,
+        status_code=status,
+        retryable=False,
+        should_fallback=True,
+    )
+
+
 # ── Classification pipeline ─────────────────────────────────────────────
 
 def classify_api_error(
@@ -529,6 +597,14 @@ def classify_api_error(
         }
         defaults.update(overrides)
         return ClassifiedError(**defaults)
+
+    # ── Cursor SDK structured errors ─────────────────────────────────
+    # cursor-sdk raises typed CursorAgentError subclasses with explicit
+    # retry hints. Map them before generic string heuristics so Hermes'
+    # retry loop respects is_retryable / retry_after from the SDK.
+    _cursor_sdk_err = _classify_cursor_sdk_error(error, _result)
+    if _cursor_sdk_err is not None:
+        return _cursor_sdk_err
 
     # ── 1. Provider-specific patterns (highest priority) ────────────
 

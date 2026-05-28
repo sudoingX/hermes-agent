@@ -87,6 +87,33 @@ def _effective_provider_label() -> str:
     return provider_label(effective)
 
 
+def _cursor_transport_label() -> str | None:
+    """Return cursor backend label (sdk vs cli) when cursor is the provider."""
+    try:
+        requested = resolve_requested_provider()
+        effective = resolve_provider(requested)
+    except AuthError:
+        effective = requested or "auto"
+    if effective != "cursor":
+        return None
+    try:
+        from agent.cursor.backend import cursor_sdk_installed, resolve_cursor_backend
+    except Exception:
+        return "cli (cursor-agent)"
+    backend = resolve_cursor_backend()
+    if backend == "sdk":
+        installed = cursor_sdk_installed()
+        return f"sdk (cursor-sdk{' ✓' if installed else ', package missing'})"
+    forced = os.getenv("HERMES_CURSOR_BACKEND", "").strip().lower() or "auto"
+    if forced == "cli":
+        return "cli (cursor-agent, forced)"
+    if not cursor_sdk_installed():
+        return "cli (cursor-agent — install cursor-sdk for SDK)"
+    if not (get_env_value("CURSOR_API_KEY") or "").strip():
+        return "cli (cursor-agent — set CURSOR_API_KEY for SDK)"
+    return "cli (cursor-agent)"
+
+
 from hermes_constants import is_termux as _is_termux
 
 
@@ -118,6 +145,9 @@ def show_status(args):
 
     print(f"  Model:        {_configured_model_label(config)}")
     print(f"  Provider:     {_effective_provider_label()}")
+    cursor_transport = _cursor_transport_label()
+    if cursor_transport:
+        print(f"  Transport:    {cursor_transport}")
 
     # =========================================================================
     # API Keys
@@ -146,6 +176,7 @@ def show_status(args):
         "FAL": "FAL_KEY",
         "ElevenLabs": "ELEVENLABS_API_KEY",
         "GitHub": "GITHUB_TOKEN",
+        "Cursor": "CURSOR_API_KEY",
     }
 
     def _resolve_env(env_ref) -> str:

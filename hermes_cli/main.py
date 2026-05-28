@@ -5472,6 +5472,40 @@ def _model_flow_cursor(config, current_model=""):
     }.get(_cursor_mode, _cursor_mode)
     print(f"  Cursor mode:  {_cursor_mode} — {_mode_blurb}")
 
+    try:
+        from hermes_cli.status import _cursor_transport_label
+
+        transport = _cursor_transport_label()
+        if transport:
+            print(f"  Transport:   {transport}")
+    except Exception:
+        pass
+
+    _cursor_api_key = (os.environ.get("CURSOR_API_KEY") or "").strip()
+    if _cursor_api_key and _cursor_api_key not in {
+        "cursor-agent-login",
+        "cursor-cli-login",
+        "external-process",
+        "external_process",
+    }:
+        try:
+            from agent.cursor.backend import cursor_sdk_installed, ensure_cursor_sdk
+
+            if not cursor_sdk_installed():
+                try:
+                    from hermes_cli.cli_output import prompt_yes_no
+
+                    if prompt_yes_no(
+                        "  Install cursor-sdk for faster SDK transport? [Y/n] ",
+                        default=True,
+                    ):
+                        ensure_cursor_sdk(prompt=True)
+                        print("  ✓ cursor-sdk installed")
+                except Exception as exc:
+                    print(f"  ⚠ cursor-sdk install skipped: {exc}")
+        except Exception:
+            pass
+
     # Live catalog first (115+ models incl. composer-2.5-fast default);
     # fall back to the curated snapshot if the CLI call fails.
     model_list = provider_model_ids(provider_id)
