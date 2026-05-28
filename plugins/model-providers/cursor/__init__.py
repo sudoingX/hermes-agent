@@ -1,14 +1,11 @@
-"""Cursor provider profile — runs through the ``cursor-agent`` CLI.
+"""Cursor provider profile — CLI or SDK transport.
 
-Cursor doesn't expose a chat completions endpoint; it ships an agent. We
-spawn ``cursor-agent -p --output-format stream-json --mode ask`` per request
-and translate the line-delimited events into an OpenAI chat-completion
-response. Auth piggybacks on the user's existing ``cursor-agent login`` (or
-``CURSOR_API_KEY``) so every Cursor tier — Hobby, Pro, Pro+, Ultra, Teams —
-can use Hermes through their existing subscription / credits.
+Cursor doesn't expose a chat completions endpoint; it ships an agent. Hermes
+routes requests through ``cursor-agent`` (CLI subprocess) or ``cursor-sdk``
+(Python SDK) depending on ``HERMES_CURSOR_BACKEND`` and ``CURSOR_API_KEY``.
 
-See ``agent/cursor_agent_client.py`` for the runtime client and
-``docs/plans/2026-05-25-cursor-provider-integration.md`` for the design.
+See ``agent/cursor/`` for the runtime client and
+``docs/cursor_architecture.md`` for the design.
 """
 
 from __future__ import annotations
