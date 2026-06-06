@@ -160,6 +160,7 @@ class CursorProviderRegistryTests(unittest.TestCase):
             models = provider_model_ids("cursor")
         self.assertIn("composer-2.5", models)
         self.assertIn("auto", models)
+        self.assertEqual(models[:3], ["auto", "composer-2.5", "composer-2.5-fast"])
 
     def test_plugin_fetch_models_honors_custom_cursor_command(self) -> None:
         """Live model discovery must work with wrappers, not only PATH installs."""

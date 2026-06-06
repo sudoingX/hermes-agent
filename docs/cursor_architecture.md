@@ -87,6 +87,49 @@ Legend / lifecycle:
 
 ---
 
+## User Setup / Requirements
+
+Cursor-routed models require Cursor's own CLI/auth path. They do **not** require separate OpenAI, Anthropic, Gemini, or OpenRouter API keys for models served by Cursor.
+
+**What users need installed:**
+
+1. **Hermes Agent** from this branch/release.
+2. **Cursor Agent CLI** (`cursor-agent`) on `PATH`.
+   - macOS/Linux/WSL install script: `curl -fsSL https://cursor.com/install | bash`
+   - Verify: `cursor-agent --version`
+3. **Cursor authentication**, either:
+   - browser login: `cursor-agent login`
+   - or Cursor API key: `export CURSOR_API_KEY=<cursor-api-key>`
+4. **A Cursor account/plan with access to the chosen model.** `cursor-agent --list-models` shows the catalog available to that account.
+
+The separate Cursor SDK (`cursor-sdk` / `@cursor/sdk`) is **not required** for Hermes' Cursor agent mode. Hermes uses the Cursor Agent CLI as a subprocess (`cursor-agent --print --output-format stream-json`); the SDK is only needed for a different in-process Python/TypeScript integration path.
+
+**Hermes setup:**
+
+```bash
+cursor-agent login
+cursor-agent --list-models
+hermes model
+# choose Cursor, then choose a model such as auto, composer-2.5, or composer-2.5-fast
+```
+
+Optional environment variables:
+
+```bash
+# custom wrapper/path
+export HERMES_CURSOR_COMMAND=/path/to/cursor-agent
+
+# extra cursor-agent args, e.g. a wrapper profile flag
+export HERMES_CURSOR_ARGS="--profile work"
+
+# read-only Cursor harness mode; default is agent/full-power
+export HERMES_CURSOR_MODE=ask
+```
+
+**Composer availability:** Cursor's Composer models (for example `composer-2.5` / `composer-2.5-fast`) are Cursor-specific. They are not listed in public OpenRouter or Nous model catalogs as of 2026-06-07, so Hermes reaches them through `cursor-agent`, not through normal HTTP provider routing.
+
+---
+
 ## Authentication
 
 Cursor is registered as `auth_type="external_process"` in `PROVIDER_REGISTRY` and `HERMES_OVERLAYS`. The marker base URL `cursor://agent` is never dereferenced over HTTP; it selects the subprocess client path.

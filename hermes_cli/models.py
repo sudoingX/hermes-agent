@@ -2259,6 +2259,13 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
         pass
 
     curated_static = list(_PROVIDER_MODELS.get(normalized, []))
+    if normalized == "cursor":
+        try:
+            from providers.cursor_utils import prioritize_cursor_models
+
+            return prioritize_cursor_models(curated_static)
+        except Exception:
+            return curated_static
     if normalized in _MODELS_DEV_PREFERRED:
         return _merge_with_models_dev(normalized, curated_static)
     return curated_static
