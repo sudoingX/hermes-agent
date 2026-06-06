@@ -18,6 +18,7 @@ You need at least one way to connect to an LLM. Use `hermes model` to switch pro
 | **OpenAI Codex** | `hermes model` (ChatGPT OAuth, uses Codex models) |
 | **GitHub Copilot** | `hermes model` (OAuth device code flow, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token`) |
 | **GitHub Copilot ACP** | `hermes model` (spawns local `copilot --acp --stdio`) |
+| **Cursor** | `hermes model` (spawns local `cursor-agent`, uses Cursor login/subscription; provider: `cursor`) |
 | **Anthropic** | `hermes model` (Claude Max + extra usage credits via OAuth; also supports Anthropic API key or manual setup-token — see note below) |
 | **OpenRouter** | `OPENROUTER_API_KEY` in `~/.hermes/.env` |
 | **NovitaAI** | `NOVITA_API_KEY` in `~/.hermes/.env` (provider: `novita`, 200+ models, Model API, Agent Sandbox, GPU Cloud) |
@@ -208,6 +209,53 @@ model:
 | `COPILOT_GITHUB_TOKEN` | GitHub token for Copilot API (first priority) |
 | `HERMES_COPILOT_ACP_COMMAND` | Override the Copilot CLI binary path (default: `copilot`) |
 | `HERMES_COPILOT_ACP_ARGS` | Override ACP args (default: `--acp --stdio`) |
+
+### Cursor
+
+Hermes can use your local Cursor subscription by spawning the official `cursor-agent` CLI. This is an external-process provider, not an HTTP API: Hermes sends each turn to `cursor-agent --output-format stream-json`, then translates Cursor's stream events back into Hermes' normal chat-completions shape.
+
+```bash
+# Install Cursor Agent on Linux/macOS/WSL
+curl https://cursor.com/install -fsS | bash
+
+# Authenticate Cursor Agent
+cursor-agent login
+cursor-agent status
+
+# Pick Cursor from the Hermes model picker
+hermes model
+
+# Or run directly
+hermes chat --provider cursor --model composer-2.5
+```
+
+Permanent config:
+
+```yaml
+model:
+  provider: cursor
+  default: composer-2.5
+  base_url: cursor://agent
+  api_mode: chat_completions
+```
+
+Useful environment variables:
+
+| Environment variable | Description |
+|---------------------|-------------|
+| `HERMES_CURSOR_COMMAND` | Override the `cursor-agent` binary or wrapper path. Use this for profiles, forked installs, or auth wrappers. |
+| `CURSOR_AGENT_PATH` | Legacy alias for `HERMES_CURSOR_COMMAND`. |
+| `HERMES_CURSOR_MODE` | Cursor Agent permission mode. `agent` means use Cursor's default behavior; `ask` and `plan` are passed as `--mode`. |
+| `HERMES_CURSOR_ARGS` | Extra Cursor CLI args used by runtime and probes (`status`, `--list-models`). Useful for profile-specific Cursor CLI options. |
+| `HERMES_CURSOR_TIMEOUT_SECONDS` | Per-turn idle timeout while waiting for Cursor stream events. |
+| `CURSOR_API_KEY` | Optional raw Cursor key. Usually unnecessary when `cursor-agent login` is already active. |
+
+Notes:
+
+- `base_url: cursor://agent` is a marker URL. Hermes never dereferences it.
+- Profile aliases should call the installed `hermes` binary, for example `exec hermes -p cursor1 "$@"`. They should not hardcode a local fork path once Cursor support is merged into Hermes.
+- On Windows, install/use Cursor Agent inside WSL. Avoid third-party PowerShell installer snippets.
+- If `hermes model` says the CLI is missing after install, either restart your shell so `~/.local/bin` is on `PATH`, or set `HERMES_CURSOR_COMMAND=/absolute/path/to/cursor-agent`.
 
 ### First-Class API-Key Providers
 

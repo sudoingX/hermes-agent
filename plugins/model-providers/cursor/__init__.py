@@ -8,16 +8,21 @@ response. Auth piggybacks on the user's existing ``cursor-agent login`` (or
 can use Hermes through their existing subscription / credits.
 
 See ``agent/cursor_agent_client.py`` for the runtime client and
-``docs/plans/2026-05-25-cursor-provider-integration.md`` for the design.
+``docs/cursor_architecture.md`` for the architecture notes.
 """
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 
 from providers import register_provider
 from providers.base import ProviderProfile
+from providers.cursor_utils import (
+    prioritize_cursor_models,
+    resolve_cursor_command,
+    resolve_cursor_command_path,
+    resolve_cursor_extra_args,
+)
 
 
 class CursorProfile(ProviderProfile):
@@ -35,10 +40,14 @@ class CursorProfile(ProviderProfile):
         are expected to fall back to the static ``_PROVIDER_MODELS["cursor"]``
         list in ``hermes_cli/models.py``.
         """
-        command = shutil.which("cursor-agent") or "cursor-agent"
+        command = resolve_cursor_command()
+        resolved_command = resolve_cursor_command_path(command)
+        if not resolved_command:
+            return None
+        args = resolve_cursor_extra_args()
         try:
             out = subprocess.check_output(
-                [command, "--list-models"],
+                [resolved_command, *args, "--list-models"],
                 text=True,
                 timeout=timeout,
             )
@@ -55,7 +64,7 @@ class CursorProfile(ProviderProfile):
                 model_id = model_id.split()[0]
                 if model_id:
                     ids.append(model_id)
-        return ids or None
+        return prioritize_cursor_models(ids) if ids else None
 
 
 cursor = CursorProfile(

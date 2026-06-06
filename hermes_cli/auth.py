@@ -50,6 +50,7 @@ import yaml
 from hermes_cli.config import get_hermes_home, get_config_path, read_raw_config
 from hermes_constants import OPENROUTER_BASE_URL, secure_parent_dir
 from agent.credential_persistence import sanitize_borrowed_credential_payload
+from providers.cursor_utils import resolve_cursor_command, resolve_cursor_command_path, resolve_cursor_extra_args
 from utils import atomic_replace, atomic_yaml_write, is_truthy_value
 
 logger = logging.getLogger(__name__)
@@ -6002,17 +6003,12 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
         return {"configured": False}
 
     if provider_id == "cursor":
-        command = (
-            os.getenv("HERMES_CURSOR_COMMAND", "").strip()
-            or os.getenv("CURSOR_AGENT_PATH", "").strip()
-            or "cursor-agent"
-        )
-        raw_args = os.getenv("HERMES_CURSOR_ARGS", "").strip()
-        args = shlex.split(raw_args) if raw_args else []
+        command = resolve_cursor_command()
+        args = resolve_cursor_extra_args()
         base_url = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
         if not base_url:
             base_url = pconfig.inference_base_url
-        resolved_command = shutil.which(command) if command else None
+        resolved_command = resolve_cursor_command_path(command)
 
         # Probe cursor-agent for the logged-in identity. Best-effort; an
         # error here just means the user needs to run `cursor-agent login`.
@@ -6023,7 +6019,7 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
                 import subprocess as _sp
 
                 out = _sp.check_output(
-                    [resolved_command, "status"],
+                    [resolved_command, *args, "status"],
                     text=True,
                     timeout=4,
                 ).strip()
@@ -6255,14 +6251,9 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
         base_url = pconfig.inference_base_url
 
     if provider_id == "cursor":
-        command = (
-            os.getenv("HERMES_CURSOR_COMMAND", "").strip()
-            or os.getenv("CURSOR_AGENT_PATH", "").strip()
-            or "cursor-agent"
-        )
-        raw_args = os.getenv("HERMES_CURSOR_ARGS", "").strip()
-        args = shlex.split(raw_args) if raw_args else []
-        resolved_command = shutil.which(command) if command else None
+        command = resolve_cursor_command()
+        args = resolve_cursor_extra_args()
+        resolved_command = resolve_cursor_command_path(command)
         if not resolved_command:
             raise AuthError(
                 f"Could not find the Cursor Agent CLI command '{command}'. "

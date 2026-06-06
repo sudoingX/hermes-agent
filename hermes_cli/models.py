@@ -2127,31 +2127,21 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
         if normalized == "copilot-acp":
             return list(_PROVIDER_MODELS.get("copilot", []))
     if normalized == "cursor":
-        # Live catalog: shell out to `cursor-agent --list-models`. Falls back
-        # to the curated snapshot when the CLI is missing or returns nothing.
+        # Live catalog: shell out via the Cursor provider profile so command
+        # overrides, wrapper args, and important-model ordering stay identical
+        # between the picker and plugin discovery path.
         try:
-            import shutil as _shutil
-            import subprocess as _subprocess
+            from providers import get_provider_profile
+            from providers.cursor_utils import prioritize_cursor_models
 
-            cmd = _shutil.which("cursor-agent")
-            if cmd:
-                out = _subprocess.check_output(
-                    [cmd, "--list-models"],
-                    text=True,
-                    timeout=8,
-                )
-                ids: list[str] = []
-                for raw_line in out.splitlines():
-                    line = raw_line.strip()
-                    if not line or " - " not in line:
-                        continue
-                    model_id = line.split(" - ", 1)[0].strip()
-                    # Strip "(current)" / "(default)" decoration on the id
-                    model_id = model_id.split()[0]
-                    if model_id:
-                        ids.append(model_id)
-                if ids:
-                    return ids
+            profile = get_provider_profile("cursor")
+            if profile:
+                live = profile.fetch_models()
+                if live:
+                    return live
+            static = list(_PROVIDER_MODELS.get("cursor", []))
+            if static:
+                return prioritize_cursor_models(static)
         except Exception:
             pass
     if normalized == "nous":
@@ -2269,6 +2259,13 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
         pass
 
     curated_static = list(_PROVIDER_MODELS.get(normalized, []))
+    if normalized == "cursor":
+        try:
+            from providers.cursor_utils import prioritize_cursor_models
+
+            return prioritize_cursor_models(curated_static)
+        except Exception:
+            return curated_static
     if normalized in _MODELS_DEV_PREFERRED:
         return _merge_with_models_dev(normalized, curated_static)
     return curated_static
