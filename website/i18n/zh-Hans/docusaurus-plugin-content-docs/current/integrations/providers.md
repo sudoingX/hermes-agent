@@ -18,6 +18,7 @@ sidebar_position: 1
 | **OpenAI Codex** | `hermes model`（ChatGPT OAuth，使用 Codex 模型） |
 | **GitHub Copilot** | `hermes model`（OAuth 设备码流程，`COPILOT_GITHUB_TOKEN`、`GH_TOKEN` 或 `gh auth token`） |
 | **GitHub Copilot ACP** | `hermes model`（在本地生成 `copilot --acp --stdio` 子进程） |
+| **Cursor** | `hermes model`（在本地生成 `cursor-agent` 子进程，使用 Cursor 登录/订阅；provider: `cursor`） |
 | **Anthropic** | `hermes model`（Claude Max + 额外用量积分，通过 OAuth；也支持 Anthropic API key 或手动 setup-token——见下方说明） |
 | **OpenRouter** | `~/.hermes/.env` 中的 `OPENROUTER_API_KEY` |
 | **NovitaAI** | `~/.hermes/.env` 中的 `NOVITA_API_KEY`（provider: `novita`，200+ 模型，Model API、Agent Sandbox、GPU Cloud） |
@@ -196,6 +197,53 @@ model:
 | `COPILOT_GITHUB_TOKEN` | Copilot API 的 GitHub token（最高优先级） |
 | `HERMES_COPILOT_ACP_COMMAND` | 覆盖 Copilot CLI 二进制路径（默认：`copilot`） |
 | `HERMES_COPILOT_ACP_ARGS` | 覆盖 ACP 参数（默认：`--acp --stdio`） |
+
+### Cursor
+
+Hermes 可以通过生成官方 `cursor-agent` CLI 子进程来使用你的本地 Cursor 订阅。这是外部进程提供商，不是 HTTP API：Hermes 将每轮对话发送给 `cursor-agent --output-format stream-json`，然后把 Cursor 的流事件转换回 Hermes 常规的 chat-completions 形态。
+
+```bash
+# 在 Linux/macOS/WSL 上安装 Cursor Agent
+curl https://cursor.com/install -fsS | bash
+
+# 认证 Cursor Agent
+cursor-agent login
+cursor-agent status
+
+# 在 Hermes 模型选择器中选择 Cursor
+hermes model
+
+# 或直接运行
+hermes chat --provider cursor --model composer-2.5
+```
+
+永久配置：
+
+```yaml
+model:
+  provider: cursor
+  default: composer-2.5
+  base_url: cursor://agent
+  api_mode: chat_completions
+```
+
+常用环境变量：
+
+| 环境变量 | 说明 |
+|---------------------|-------------|
+| `HERMES_CURSOR_COMMAND` | 覆盖 `cursor-agent` 二进制或包装脚本路径。适用于 profiles、fork 安装或认证包装脚本。 |
+| `CURSOR_AGENT_PATH` | `HERMES_CURSOR_COMMAND` 的旧版别名。 |
+| `HERMES_CURSOR_MODE` | Cursor Agent 权限模式。`agent` 表示使用 Cursor 默认行为；`ask` 和 `plan` 会作为 `--mode` 传入。 |
+| `HERMES_CURSOR_ARGS` | runtime 和探测命令（`status`、`--list-models`）都会使用的额外 Cursor CLI 参数。适用于 profile 专属的 Cursor CLI 选项。 |
+| `HERMES_CURSOR_TIMEOUT_SECONDS` | 等待 Cursor 流事件时的单轮空闲超时。 |
+| `CURSOR_API_KEY` | 可选的原始 Cursor key。通常已有 `cursor-agent login` 时不需要。 |
+
+说明：
+
+- `base_url: cursor://agent` 是标记 URL。Hermes 不会对它发起网络请求。
+- profile 别名应调用已安装的 `hermes` 二进制，例如 `exec hermes -p cursor1 "$@"`。Cursor 支持合并进 Hermes 后，不应硬编码本地 fork 路径。
+- 在 Windows 上，请在 WSL 内安装/使用 Cursor Agent。避免第三方 PowerShell 安装片段。
+- 如果安装后 `hermes model` 仍提示缺少 CLI，请重启 shell 让 `~/.local/bin` 进入 `PATH`，或设置 `HERMES_CURSOR_COMMAND=/absolute/path/to/cursor-agent`。
 
 ### 一等 API Key 提供商
 

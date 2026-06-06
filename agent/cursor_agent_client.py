@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 import os
 import queue
-import shlex
 import shutil
 import subprocess
 import tempfile
@@ -43,9 +42,9 @@ from types import SimpleNamespace
 from typing import Any
 
 from agent.redact import redact_sensitive_text
+from providers.cursor_utils import DEFAULT_CURSOR_COMMAND, resolve_cursor_command, resolve_cursor_extra_args
 
 CURSOR_MARKER_BASE_URL = "cursor://agent"
-DEFAULT_CURSOR_COMMAND = "cursor-agent"
 # ``agent`` matches cursor-agent's own default permissionMode (the
 # behavior you get from ``cursor-agent -p`` with no ``--mode`` flag).
 # This is what a user picking ``cursor`` in ``hermes model`` will expect:
@@ -286,18 +285,11 @@ def _format_messages_as_prompt(
 
 
 def _resolve_command() -> str:
-    return (
-        os.getenv("HERMES_CURSOR_COMMAND", "").strip()
-        or os.getenv("CURSOR_AGENT_PATH", "").strip()
-        or DEFAULT_CURSOR_COMMAND
-    )
+    return resolve_cursor_command()
 
 
 def _resolve_extra_args() -> list[str]:
-    raw = os.getenv("HERMES_CURSOR_ARGS", "").strip()
-    if not raw:
-        return []
-    return shlex.split(raw)
+    return resolve_cursor_extra_args()
 
 
 def _resolve_mode() -> str:
